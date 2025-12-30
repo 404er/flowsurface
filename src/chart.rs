@@ -1,8 +1,20 @@
-pub mod comparison;
-pub mod heatmap;
-pub mod indicator;
-pub mod kline;
-mod scale;
+// ============================================================================
+// 图表系统核心模块
+// 
+// 这是整个图表渲染系统的抽象层，定义了所有图表类型的通用接口
+// 包括：热力图、K线图、对比图等
+// 
+// 设计模式：
+// - Trait 抽象：Chart trait 定义通用行为
+// - 策略模式：不同图表类型实现不同的渲染策略
+// - 缓存优化：使用 Canvas Cache 减少重绘
+// ============================================================================
+
+pub mod comparison;  // 对比图模块
+pub mod heatmap;     // 热力图模块
+pub mod indicator;   // 指标模块
+pub mod kline;       // K线图模块
+mod scale;           // 坐标轴模块（私有）
 
 use crate::style;
 use crate::widget::multi_split::{DRAG_SIZE, MultiSplit};
@@ -21,65 +33,228 @@ use iced::{
     widget::{button, center, column, container, mouse_area, row, rule, text},
 };
 
+/// 缩放敏感度常量（数值越大，缩放越慢）
 const ZOOM_SENSITIVITY: f32 = 30.0;
+
+/// 默认文本大小（像素）
 const TEXT_SIZE: f32 = 12.0;
 
+/// ============================================================================
+/// Interaction - 用户交互模式枚举
+/// 
+/// 表示当前图表的交互状态
+/// 
+/// Rust 特性：
+/// - #[derive(Default)] 自动生成 Default trait 实现
+/// - #[default] 标记默认变体
+/// - Debug, Clone, Copy 使这个枚举轻量且易于调试
+/// ============================================================================
 #[derive(Default, Debug, Clone, Copy)]
 pub enum Interaction {
+    /// 无交互（默认状态）
     #[default]
     None,
+    
+    /// 缩放模式
+    /// 存储上次鼠标位置，用于计算缩放中心
     Zoomin {
         last_position: Point,
     },
+    
+    /// 平移模式（拖拽）
+    /// 
+    /// translation: 当前的平移向量
+    /// start: 拖拽起始点
     Panning {
-        translation: Vector,
-        start: Point,
+        translation: Vector,  // 累积的平移量
+        start: Point,         // 拖拽起始坐标
     },
+    
+    /// 测量尺模式（Shift键）
+    /// 
+    /// 用于测量价格差、时间差等
+    /// start: 测量起始点（None 表示尚未开始）
     Ruler {
         start: Option<Point>,
     },
 }
 
+/// ============================================================================
+/// AxisScaleClicked - 坐标轴点击事件
+/// 
+/// 双击坐标轴触发不同的自动缩放行为
+/// ============================================================================
 #[derive(Debug, Clone, Copy)]
 pub enum AxisScaleClicked {
+    /// X轴被双击（重置时间轴缩放）
     X,
+    /// Y轴被双击（自动缩放价格轴）
     Y,
 }
 
+/// ============================================================================
+/// Message - 图表消息枚举
+/// 
+/// 定义图表模块内的所有事件和消息类型
+/// 这些消息由用户交互或系统事件触发
+/// 
+/// Rust 特性：
+/// - #[derive(Debug, Clone, Copy)] 使消息可调试、可复制
+/// - Copy trait 表示可以按位复制（所有字段都是 Copy 类型）
+/// ============================================================================
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
+    /// 平移事件
+    /// Vector 包含 x 和 y 方向的平移量
     Translated(Vector),
+    
+    /// 缩放事件
+    /// 
+    /// 参数：
+    /// - f32: 新的缩放系数
+    /// - Vector: 更新后的平移向量（调整缩放中心）
     Scaled(f32, Vector),
+    
+    /// 切换自动缩放模式
+    /// 循环切换：None -> CenterLatest -> FitToVisible -> None
     AutoscaleToggled,
+    
+    /// 十字线移动事件（仅重绘十字线，不重绘主图）
     CrosshairMoved,
+    
+    /// Y轴缩放事件
+    /// 
+    /// 参数：
+    /// - delta: 缩放增量
+    /// - cursor_y: 鼠标Y坐标（相对于画布中心）
+    /// - is_wheel: 是否为鼠标滚轮触发
     YScaling(f32, f32, bool),
+    
+    /// X轴缩放事件
+    /// 
+    /// 参数：
+    /// - delta: 缩放增量
+    /// - cursor_x: 鼠标X坐标
+    /// - is_wheel: 是否为鼠标滚轮触发
     XScaling(f32, f32, bool),
+    
+    /// 画布边界变更事件
+    /// 
+    /// 当窗口调整大小时触发
+    /// Rectangle 包含新的画布尺寸和位置
     BoundsChanged(Rectangle),
+    
+    /// 指标分屏拖拽事件
+    /// 
+    /// 参数：
+    /// - usize: 分隔线索引
+    /// - f32: 新的位置比例 (0.0 - 1.0)
     SplitDragged(usize, f32),
+    
+    /// 坐标轴双击事件
     DoubleClick(AxisScaleClicked),
 }
 
+/// ============================================================================
+/// Chart trait - 图表类型的统一抽象接口
+/// 
+/// 所有图表类型（热力图、K线图、对比图等）都必须实现这个 trait
+/// 
+/// Rust 特性详解：
+/// 
+/// 1. Trait 继承（Trait Bounds）
+///    - Chart: PlotConstants 表示实现 Chart 必须先实现 PlotConstants
+///    - canvas::Program<Message> 是 iced 的绘图接口，处理渲染和事件
+/// 
+/// 2. 关联类型（Associated Type）
+///    - type IndicatorKind 是关联类型，允许不同图表使用不同的指标类型
+///    - 优于泛型参数：更清晰，避免类型参数污染
+/// 
+/// 3. 生命周期标注
+///    - &'_ self 中的 '_ 是匿名生命周期，编译器自动推断
+///    - &[Self::IndicatorKind] 切片引用的生命周期与函数调用绑定
+///    - Vec<Element<'_, Message>> 返回值的生命周期与 self 绑定
+/// ============================================================================
 pub trait Chart: PlotConstants + canvas::Program<Message> {
+    /// 关联类型：指标种类
+    /// 
+    /// 每种图表可以定义自己的指标类型
+    /// 例如：K线图有成交量、持仓量等指标
     type IndicatorKind: Indicator;
 
+    /// 获取视图状态的不可变引用
+    /// 
+    /// ViewState 包含缩放、平移、边界等通用状态
+    /// 
+    /// # Rust 所有权
+    /// - &self 是不可变借用，不转移所有权
+    /// - 返回 &ViewState，允许调用者读取但不修改
     fn state(&self) -> &ViewState;
 
+    /// 获取视图状态的可变引用
+    /// 
+    /// 用于更新缩放、平移等状态
+    /// 
+    /// # Rust 所有权
+    /// - &mut self 是可变借用，独占访问
+    /// - 在可变借用期间，不能有其他借用（编译时保证）
     fn mut_state(&mut self) -> &mut ViewState;
 
+    /// 使所有缓存失效，触发完整重绘
+    /// 
+    /// 当数据更新或配置改变时调用
     fn invalidate_all(&mut self);
 
+    /// 仅使十字线缓存失效
+    /// 
+    /// 优化：鼠标移动时只重绘十字线，不重绘整个图表
+    /// 这是性能优化的关键
     fn invalidate_crosshair(&mut self);
 
+    /// 渲染指标面板
+    /// 
+    /// 返回指标的 UI 元素列表
+    /// 
+    /// # 参数
+    /// - enabled: 启用的指标列表切片
+    /// 
+    /// # 生命周期
+    /// - &'_ self: 匿名生命周期，与函数调用绑定
+    /// - Element<'_, Message>: UI 元素的生命周期与 self 绑定
+    ///   这确保 UI 元素不会悬垂引用
     fn view_indicators(&'_ self, enabled: &[Self::IndicatorKind]) -> Vec<Element<'_, Message>>;
 
+    /// 获取可见时间范围
+    /// 
+    /// # 返回值
+    /// - Some((earliest, latest)): 可见区域的时间戳范围（毫秒）
+    /// - None: 无数据或无法确定范围
     fn visible_timerange(&self) -> Option<(u64, u64)>;
 
+    /// 获取所有时间间隔键
+    /// 
+    /// 用于 X 轴标签渲染
+    /// 
+    /// # 返回值
+    /// - Some(keys): 时间戳列表
+    /// - None: 不适用（如对比图）
     fn interval_keys(&self) -> Option<Vec<u64>>;
 
+    /// 获取自动缩放的坐标
+    /// 
+    /// 返回自动缩放模式下的目标平移向量
     fn autoscaled_coords(&self) -> Vector;
 
+    /// 是否支持"适应可见区域"自动缩放
+    /// 
+    /// # 返回值
+    /// - true: 支持（如 K线图）
+    /// - false: 不支持（如热力图）
     fn supports_fit_autoscaling(&self) -> bool;
 
+    /// 检查图表是否为空
+    /// 
+    /// 用于显示"等待数据"提示
     fn is_empty(&self) -> bool;
 }
 
@@ -307,6 +482,9 @@ pub fn update<T: Chart>(chart: &mut T, message: &Message) {
 
             if let Some(Autoscale::FitToVisible) = state.layout.autoscale {
                 state.translation.x = translation.x;
+                state.translation.y = translation.y;
+                log::info!("Translation: x={}, y={}, autoscale={:?}", 
+                translation.x, translation.y, state.layout.autoscale);
             } else {
                 state.translation = *translation;
                 state.layout.autoscale = None;
@@ -644,20 +822,130 @@ impl Caches {
     }
 }
 
+/// ============================================================================
+/// ViewState - 图表视图状态
+/// 
+/// 存储图表渲染所需的所有状态信息
+/// 这是图表系统中最重要的结构体，管理：
+/// - 视口变换（缩放、平移）
+/// - 坐标系统（时间/价格映射）
+/// - 渲染缓存
+/// - 布局配置
+/// 
+/// 设计理念：
+/// - 所有图表类型共享相同的视图状态结构
+/// - 通过 ViewState 统一处理缩放、平移等交互
+/// - 使用缓存优化渲染性能
+/// ============================================================================
 pub struct ViewState {
+    /// 渲染缓存
+    /// 
+    /// 分层缓存策略：
+    /// - main: 主图内容（K线、热力图等）
+    /// - x_labels: X 轴标签
+    /// - y_labels: Y 轴标签
+    /// - crosshair: 十字线（最频繁更新）
+    /// 
+    /// Rust 特性：分层缓存允许独立失效，避免不必要的重绘
     cache: Caches,
+    
+    /// 画布边界矩形
+    /// 
+    /// 包含位置 (x, y) 和尺寸 (width, height)
+    /// 当窗口调整大小时更新
     bounds: Rectangle,
+    
+    /// 平移向量
+    /// 
+    /// 表示图表内容相对于画布中心的偏移
+    /// - x: 水平平移（正值向右）
+    /// - y: 垂直平移（正值向下）
+    /// 
+    /// 坐标系：画布中心为原点
     translation: Vector,
+    
+    /// 缩放系数
+    /// 
+    /// 1.0 = 100%，2.0 = 200%（放大），0.5 = 50%（缩小）
+    /// 约束范围：MIN_SCALING ~ MAX_SCALING
     scaling: f32,
+    
+    /// 单元格宽度（X 轴）
+    /// 
+    /// 对于时间图表：表示单位时间间隔的像素宽度
+    /// 对于 Tick 图表：表示单个 Tick 的像素宽度
+    /// 
+    /// 可通过鼠标滚轮或双击 X 轴调整
     cell_width: f32,
+    
+    /// 单元格高度（Y 轴）
+    /// 
+    /// 表示单位价格步长的像素高度
+    /// 影响价格轴的密度
     cell_height: f32,
+    
+    /// 坐标基准
+    /// 
+    /// enum Basis {
+    ///     Time(Timeframe),  // 基于时间（1分钟、5分钟等）
+    ///     Tick(u32),        // 基于交易数量
+    /// }
+    /// 
+    /// 决定 X 轴的含义和数据聚合方式
     basis: Basis,
+    
+    /// 最新价格信息标签
+    /// 
+    /// 用于在 Y 轴上高亮显示当前价格
+    /// Option 表示可能没有价格数据
+    /// 
+    /// PriceInfoLabel 包含：
+    /// - 价格值
+    /// - 涨跌状态（决定颜色：绿涨红跌）
     last_price: Option<PriceInfoLabel>,
+    
+    /// Y 轴基准价格
+    /// 
+    /// 作为价格坐标系的原点
+    /// 所有价格通过与此价格的差值计算 Y 坐标
+    /// 
+    /// Price 是自定义类型，使用整数存储（避免浮点误差）
     base_price_y: Price,
+    
+    /// X 轴最新位置
+    /// 
+    /// 对于时间图表：最新的时间戳（毫秒）
+    /// 对于 Tick 图表：最新的 Tick 索引
     latest_x: u64,
+    
+    /// 价格步长
+    /// 
+    /// 交易所的最小价格变动单位
+    /// 例如：0.01 表示价格以分为单位
+    /// 
+    /// PriceStep 存储为 10 的幂次（节省空间，提高性能）
     tick_size: PriceStep,
+    
+    /// 价格小数位数
+    /// 
+    /// 用于格式化价格显示
+    /// 例如：decimals=2 表示显示 "50000.00"
     decimals: usize,
+    
+    /// 交易对信息
+    /// 
+    /// 包含：
+    /// - ticker: 交易对标识
+    /// - min_ticksize: 最小价格步长
+    /// - min_qty: 最小交易数量
+    /// - contract_size: 合约大小（期货）
     ticker_info: TickerInfo,
+    
+    /// 布局配置
+    /// 
+    /// 包含：
+    /// - autoscale: 自动缩放模式
+    /// - splits: 指标分屏比例
     layout: ViewConfig,
 }
 

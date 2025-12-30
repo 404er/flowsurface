@@ -37,7 +37,7 @@ use iced::{
     widget::{button, center, column, container, pane_grid, pick_list, row, text, tooltip},
 };
 use std::time::Instant;
-
+use rust_i18n::t;
 #[derive(Debug, Clone)]
 pub enum Effect {
     RefreshStreams,
@@ -93,7 +93,7 @@ pub enum Event {
     StudyConfigurator(modal::pane::settings::study::StudyMessage),
     StreamModifierChanged(modal::stream::Message),
     ComparisonChartInteraction(super::chart::comparison::Message),
-    MiniTickersListInteraction(modal::pane::mini_tickers_list::Message),
+    MiniTickersListInteraction(modal::pane::mini_tickers_list::Message)
 }
 
 pub struct State {
@@ -533,7 +533,7 @@ impl State {
                 let base: Element<_> = widget::toast::Manager::new(
                     center(
                         column![
-                            text("Choose a view to get started").size(16),
+                            text(t!("chart.choose_a_view_to_get_started")).size(16),
                             content_picklist
                         ]
                         .align_x(Alignment::Center)
@@ -1328,6 +1328,14 @@ impl State {
                 control_btn_style(is_popout),
             ));
         }
+
+        buttons = buttons.push(button_with_tooltip(
+            icon_text(Icon::ChartOutline, 12),
+            Message::SplitPane(pane_grid::Axis::Horizontal, pane),
+            Some("Split"),
+            tooltip_pos,
+            control_btn_style(false),
+        ));
 
         if total_panes > 1 {
             let (resize_icon, message) = if is_maximized {

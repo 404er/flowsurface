@@ -30,6 +30,7 @@ palette = "0.7.6"
 num-traits = "0.2.19"
 rustc-hash = "2.1.1"
 enum-map = "2.7.3"
+rust-i18n = "3.0"
 uuid = { version = "1.11.0", features = ["v4"] }
 
 [dependencies]
@@ -61,6 +62,8 @@ rodio = { version = "0.20.1", default-features = false, features = [ "wav" ]}
 
 exchange = { version = "0.1.0", path = "exchange", package = "flowsurface-exchange" }
 data = { version = "0.1.0", path = "data", package = "flowsurface-data" }
-
+rust-i18n.workspace = true
+[dev-dependencies]
+cargo-watch = "8.0"
 [features]
 debug = ["iced/hot"]

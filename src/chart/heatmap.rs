@@ -1,3 +1,19 @@
+// ============================================================================
+// 热力图 (Heatmap / Historical DOM) 实现
+// 
+// 这是最复杂的图表类型，显示历史订单簿和交易热力
+// 核心功能：
+// - 时间序列的价格分布可视化
+// - 交易量热力图渲染
+// - 历史订单簿重建
+// - 成交量分布图（Volume Profile）
+// 
+// 数据来源：
+// - 实时交易数据（WebSocket）
+// - 订单簿快照（L2 Depth）
+// - 历史交易数据（可选）
+// ============================================================================
+
 use super::{
     Chart, Interaction, Message, PlotConstants, TEXT_SIZE, ViewState, scale::linear::PriceInfoLabel,
 };
@@ -31,25 +47,40 @@ use iced::{
     theme::palette::Extended,
 };
 
-use enum_map::EnumMap;
-use rustc_hash::FxHashMap;
+use enum_map::EnumMap;  // 高效的枚举索引 map
+use rustc_hash::FxHashMap;  // 高性能 HashMap（FxHash 比默认的 SipHash 快）
 use std::time::Instant;
 
+// ============================================================================
+// 热力图渲染常量
+// ============================================================================
+
+/// Y 轴最小缩放系数（数值越小，缩放越多）
 const MIN_SCALING: f32 = 0.6;
+/// Y 轴最大缩放系数
 const MAX_SCALING: f32 = 1.2;
 
+/// X 轴单元格最大宽度（像素）
 const MAX_CELL_WIDTH: f32 = 12.0;
+/// X 轴单元格最小宽度
 const MIN_CELL_WIDTH: f32 = 1.0;
 
+/// Y 轴单元格最大高度（像素）
 const MAX_CELL_HEIGHT: f32 = 10.0;
+/// Y 轴单元格最小高度
 const MIN_CELL_HEIGHT: f32 = 1.0;
 
+/// X 轴单元格默认宽度
 const DEFAULT_CELL_WIDTH: f32 = 3.0;
 
+/// 工具提示框宽度
 const TOOLTIP_WIDTH: f32 = 198.0;
+/// 工具提示框高度
 const TOOLTIP_HEIGHT: f32 = 66.0;
+/// 工具提示框内边距
 const TOOLTIP_PADDING: f32 = 12.0;
 
+/// Volume Profile 圆点最大半径（像素）
 const MAX_CIRCLE_RADIUS: f32 = 16.0;
 
 impl Chart for HeatmapChart {

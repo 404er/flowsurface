@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod layout_manager;
 pub mod pane;
+pub mod setting_window;
 pub mod theme_editor;
 
 use iced::widget::{center, container, mouse_area, opaque, stack};
@@ -8,6 +9,7 @@ use iced::{Alignment, Color, Element, Length, padding};
 pub use layout_manager::LayoutManager;
 pub use pane::indicators;
 pub use pane::stream::{self, ModifierKind};
+pub use setting_window::SettingWindow;
 pub use theme_editor::ThemeEditor;
 
 pub fn main_dialog_modal<'a, Message>(

@@ -1,20 +1,35 @@
+// ============================================================================
+// 条件编译属性：Release 模式下隐藏 Windows 控制台窗口
+// #![cfg_attr] 是 Rust 的条件属性，根据编译配置决定是否应用
+// ============================================================================
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audio;
-mod chart;
-mod layout;
-mod logger;
-mod modal;
-mod screen;
-mod style;
-mod widget;
-mod window;
+// ============================================================================
+// 模块声明：声明项目的子模块结构
+// Rust 的模块系统使用 mod 关键字，每个模块对应一个文件或目录
+// ============================================================================
+mod audio;      // 音频播放模块
+mod chart;      // 图表渲染核心模块
+mod layout;     // 布局管理模块
+mod logger;     // 日志系统模块
+mod modal;      // 模态对话框模块
+mod screen;     // 屏幕/界面模块
+mod style;      // 样式和主题模块
+mod widget;     // 自定义UI组件模块
+mod window;     // 窗口管理模块
+mod i18n;
 
+rust_i18n::i18n!("locales", fallback = "en-US");
+use rust_i18n::t;
+// ============================================================================
+// 依赖导入：从其他 crate (库) 导入需要的类型和函数
+// use 语句用于将项目引入当前作用域，避免每次都写完整路径
+// ============================================================================
 use data::config::theme::default_theme;
 use data::{layout::WindowSpec, sidebar};
 use layout::{LayoutId, configuration};
-use modal::{LayoutManager, ThemeEditor, audio::AudioStream};
-use modal::{dashboard_modal, main_dialog_modal};
+use modal::{LayoutManager, SettingWindow, ThemeEditor, audio::AudioStream};
+use modal::{dashboard_modal, main_dialog_modal, setting_window};
 use screen::dashboard::{self, Dashboard};
 use widget::{
     confirm_dialog_container,
@@ -22,76 +37,196 @@ use widget::{
     tooltip,
 };
 
+// iced 是 GUI 框架，使用 Elm 架构模式
 use iced::{
     Alignment, Element, Subscription, Task, keyboard, padding,
     widget::{
-        button, column, container, pane_grid, pick_list, row, rule, scrollable, text,
+        button, column, container, pick_list, row, rule, scrollable, text,
         tooltip::Position as TooltipPosition,
     },
 };
-use std::{borrow::Cow, collections::HashMap, vec};
+use std::{collections::HashMap, vec};
 
+/// ============================================================================
+/// 应用程序入口点
+/// 
+/// Rust 程序从 main 函数开始执行
+/// 这里初始化日志系统、启动后台任务，并运行 GUI 主循环
+/// ============================================================================
 fn main() {
+    // 初始化日志系统
     logger::setup(cfg!(debug_assertions)).expect("Failed to initialize logger");
 
+    // 在后台线程中清理旧的市场数据文件
     std::thread::spawn(data::cleanup_old_market_data);
 
+    // iced::daemon() 启动 GUI 应用程序，使用 Elm 架构
+    // 参数说明：
+    //   1. new: 初始化函数，返回 (State, Task)
+    //   2. update: 状态更新函数，处理消息并返回新的 Task
+    //   3. view: 视图渲染函数，根据状态生成 UI
+    // let _ = ... 忽略返回值（应用退出时的结果）
     let _ = iced::daemon(Flowsurface::new, Flowsurface::update, Flowsurface::view)
         .settings(iced::Settings {
-            antialiasing: true,
+            antialiasing: true,  // 开启抗锯齿，使图形更平滑
+            // 加载字体文件
+            // Cow (Clone on Write) 是智能指针，这里使用 Borrowed 避免拷贝
             fonts: vec![
-                Cow::Borrowed(style::AZERET_MONO_BYTES),
-                Cow::Borrowed(style::ICONS_BYTES),
+                Cow::Borrowed(style::AZERET_MONO_BYTES),  // 等宽字体
+                Cow::Borrowed(style::ICONS_BYTES),        // 图标字体
             ],
             default_text_size: iced::Pixels(12.0),
-            ..Default::default()
+            ..Default::default()  // 其余字段使用默认值（Rust 的结构体更新语法）
         })
-        .title(Flowsurface::title)
-        .theme(Flowsurface::theme)
-        .scale_factor(Flowsurface::scale_factor)
-        .subscription(Flowsurface::subscription)
-        .run();
+        .title(Flowsurface::title)           // 窗口标题
+        .theme(Flowsurface::theme)           // 应用主题
+        .scale_factor(Flowsurface::scale_factor)  // UI 缩放系数
+        .subscription(Flowsurface::subscription)  // 事件订阅（WebSocket、定时器等）
+        .run();  // 阻塞运行，直到应用退出
 }
 
+/// ============================================================================
+/// Flowsurface 应用程序的全局状态结构体
+/// 
+/// 这是整个应用的核心状态容器，遵循 Elm 架构的 Model 部分
+/// 所有的 UI 状态和数据都存储在这里
+/// ============================================================================
 struct Flowsurface {
+    /// 主窗口句柄，用于窗口操作和坐标转换
     main_window: window::Window,
+    
+    /// 侧边栏状态，包含交易对列表、搜索框等
     sidebar: dashboard::Sidebar,
+    
+    /// 布局管理器，管理多个布局配置（工作空间）
     layout_manager: LayoutManager,
+    
+    /// 主题编辑器状态，支持自定义主题颜色
     theme_editor: ThemeEditor,
+    
+    /// 音频流管理器，处理交易声音提示
     audio_stream: AudioStream,
+    
+    /// 确认对话框，使用 Option 表示可能不存在
+    /// Option<T> 是 Rust 的标准类型，避免空指针错误
     confirm_dialog: Option<screen::ConfirmDialog<Message>>,
+    
+    /// 数量单位设置（基础货币 / 报价货币）
     volume_size_unit: exchange::SizeUnit,
+    
+    /// UI 缩放系数（0.8 - 1.5）
     ui_scale_factor: data::ScaleFactor,
+    
+    /// 时区设置（UTC / 本地时间）
     timezone: data::UserTimezone,
+    
+    /// 当前应用主题
     theme: data::Theme,
+    
+    /// 通知消息队列，Vec<T> 是 Rust 的动态数组（类似 ArrayList）
+    /// 注意：Vec 在堆上分配，自动管理内存
     notifications: Vec<Toast>,
+    
+    /// 设置窗口状态和 ID
+    setting_window: Option<(SettingWindow, window::Id)>,
+
+    language: i18n::Language,
 }
 
+/// ============================================================================
+/// 消息枚举 - Elm 架构的 Msg 部分
+/// 
+/// 定义所有可能的用户操作和系统事件
+/// 这是 Rust 的和类型（Sum Type），每个变体可以携带不同的数据
+/// 
+/// Rust 特性说明：
+/// - #[derive(Debug, Clone)] 是派生宏，自动实现 Debug 和 Clone trait
+/// - Debug trait 允许使用 {:?} 格式化输出
+/// - Clone trait 允许显式复制值（Rust 默认是移动语义）
+/// - enum 是标签联合（Tagged Union），编译器保证类型安全
+/// ============================================================================
 #[derive(Debug, Clone)]
 enum Message {
+    /// 打开新设置窗口
+    OpenNewSettingWindow,
+    /// 设置窗口已打开
+    SettingWindowOpened(window::Id),
+    /// 设置窗口已关闭
+    SettingWindowClosed(window::Id),
+    /// 设置窗口消息
+    SettingWindow(setting_window::Message),
+
+    /// 侧边栏消息（嵌套消息模式）
+    /// 括号内的类型表示这个变体携带的数据
     Sidebar(dashboard::sidebar::Message),
+    
+    /// 市场 WebSocket 事件（实时数据）
     MarketWsEvent(exchange::Event),
+    
+    /// Dashboard 消息，使用结构体语法的枚举变体
+    /// 可以为字段添加文档注释
     Dashboard {
-        /// If `None`, the active layout is used for the event.
+        /// 目标布局 ID，None 表示使用当前活动布局
+        /// Option<T> 是 Rust 处理可空值的方式，编译时保证安全
         layout_id: Option<uuid::Uuid>,
+        /// 实际的 Dashboard 事件
         event: dashboard::Message,
     },
+    
+    /// 定时器滴答事件（每 100ms 触发一次）
+    /// Instant 是单调时钟，用于性能测量
     Tick(std::time::Instant),
+    
+    /// 窗口事件（关闭、调整大小等）
     WindowEvent(window::Event),
+    
+    /// 退出请求，携带所有窗口的位置和尺寸信息
+    /// HashMap 是哈希表，存储键值对
     ExitRequested(HashMap<window::Id, WindowSpec>),
+    
+    /// 重启请求（例如切换数量单位需要重启）
     RestartRequested(HashMap<window::Id, WindowSpec>),
+    
+    /// 返回上一级（ESC 键）
     GoBack,
+    
+    /// 打开数据文件夹请求
     DataFolderRequested,
+    
+    /// 主题选择变更
     ThemeSelected(data::Theme),
+    
+    /// UI 缩放系数变更
     ScaleFactorChanged(data::ScaleFactor),
+    
+    /// 时区设置变更
     SetTimezone(data::UserTimezone),
+    
+    /// 切换历史交易数据获取（仅 Binance）
+    /// bool 表示开启/关闭
     ToggleTradeFetch(bool),
+    
+    /// 应用数量单位设置（需要重启）
     ApplyVolumeSizeUnit(exchange::SizeUnit),
+    
+    /// 移除指定索引的通知
+    /// usize 是平台相关的无符号整数类型（指针大小）
     RemoveNotification(usize),
+    
+    /// 切换对话框显示状态
     ToggleDialogModal(Option<screen::ConfirmDialog<Message>>),
+    
+    /// 主题编辑器消息
     ThemeEditor(modal::theme_editor::Message),
+    
+    /// 布局管理器消息
     Layouts(modal::layout_manager::Message),
+    
+    /// 音频流消息
     AudioStream(modal::audio::Message),
+
+    // 语言切换
+    LanguageChanged(i18n::Language),
 }
 
 impl Flowsurface {
@@ -123,6 +258,8 @@ impl Flowsurface {
             volume_size_unit: saved_state.volume_size_unit,
             theme: saved_state.theme,
             notifications: vec![],
+            setting_window: None,
+            language: i18n::Language::English,
         };
 
         let active_layout_id = state.layout_manager.active_layout_id().unwrap_or(
@@ -207,6 +344,14 @@ impl Flowsurface {
             Message::WindowEvent(event) => match event {
                 window::Event::CloseRequested(window) => {
                     let main_window = self.main_window.id;
+                    
+                    // 检查是否是设置窗口的关闭请求
+                    if let Some((_, window_id)) = &self.setting_window {
+                        if *window_id == window {
+                            return Task::done(Message::SettingWindowClosed(window));
+                        }
+                    }
+                    
                     let dashboard = self.active_dashboard_mut();
 
                     if window != main_window {
@@ -442,6 +587,67 @@ impl Flowsurface {
                         .push(Toast::error(format!("Failed to open data folder: {err}")));
                 }
             }
+            // 打开新设置窗口
+            Message::OpenNewSettingWindow => {
+                // 如果设置窗口已经打开，则不重复打开
+                if self.setting_window.is_some() {
+                    return Task::none();
+                }
+                
+                // 使用 iced 的 window::open 打开新窗口
+                let (_id, open_task) = window::open(window::Settings {
+                    size: iced::Size::new(600.0, 400.0),
+                    position: window::Position::Centered,
+                    exit_on_close_request: false,
+                    ..Default::default()
+                });
+                
+                // 返回任务并映射到 SettingWindowOpened 消息
+                return open_task.map(Message::SettingWindowOpened);
+            }
+            Message::SettingWindowOpened(id) => {
+                // 创建新的设置窗口实例
+                self.setting_window = Some((SettingWindow::new(), id));
+            }
+            Message::SettingWindow(msg) => {
+                // 处理设置窗口的消息
+                if let Some((window, id)) = &mut self.setting_window {
+                    if let Some(action) = window.update(msg) {
+                        match action {
+                            setting_window::Action::Close => {
+                                return Task::done(Message::SettingWindowClosed(id.clone()));
+                            }
+                            setting_window::Action::ThemeChanged(theme) => {
+                                return Task::done(Message::ThemeSelected(data::Theme(theme.into()))); 
+                            }
+                            setting_window::Action::TimezoneChanged(timezone) => {
+                                return Task::done(Message::SetTimezone(timezone));
+                            }
+                            setting_window::Action::OpenThemeEditor => {
+                                // todo 主题编辑
+                                return Task::none();
+                            }
+                            setting_window::Action::ScaleFactorChanged(scale_factor) => {
+                                return Task::done(Message::ScaleFactorChanged(scale_factor));
+                            }
+                            setting_window::Action::LanguageChanged(language) => {
+                                return Task::done(Message::LanguageChanged(language));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::SettingWindowClosed(id) => {
+                // 清除设置窗口的状态
+                if let Some((_, window_id)) = &self.setting_window {
+                    if *window_id == id {
+                        self.setting_window = None;
+                    }
+                }
+                
+                // 关闭窗口
+                return window::close(id);
+            }
             Message::ThemeEditor(msg) => {
                 let action = self.theme_editor.update(msg, &self.theme.clone().into());
 
@@ -503,6 +709,10 @@ impl Flowsurface {
 
                 return window::collect_window_specs(active_windows, Message::RestartRequested);
             }
+            Message::LanguageChanged(lang) => {
+                i18n::set_language(lang);
+                self.language = lang;
+            }
         }
         Task::none()
     }
@@ -563,6 +773,30 @@ impl Flowsurface {
             } else {
                 base.into()
             }
+        } else if let Some((window, window_id)) = &self.setting_window {
+            // 设置窗口的视图
+            if *window_id == id {
+                return window.view(
+                    &self.theme,
+                    &self.theme_editor,
+                    self.timezone,
+                    self.volume_size_unit,
+                    self.ui_scale_factor,
+                    // self.sidebar.position(),
+                ).map(Message::SettingWindow);
+            }
+            
+            // 如果不是设置窗口，继续检查其他窗口
+            container(
+                dashboard
+                    .view_window(id, &self.main_window, tickers_table, self.timezone)
+                    .map(move |msg| Message::Dashboard {
+                        layout_id: None,
+                        event: msg,
+                    }),
+            )
+            .padding(padding::top(style::TITLE_PADDING_TOP))
+            .into()
         } else {
             container(
                 dashboard
@@ -592,7 +826,14 @@ impl Flowsurface {
         self.theme.clone().into()
     }
 
-    fn title(&self, _window: window::Id) -> String {
+    fn title(&self, window: window::Id) -> String {
+        // 检查是否是设置窗口
+        if let Some((_, window_id)) = &self.setting_window {
+            if *window_id == window {
+                return t!("settings.title").to_string();
+            }
+        }
+        
         if let Some(id) = self.layout_manager.active_layout_id() {
             format!("Flowsurface [{}]", id.name)
         } else {
@@ -820,7 +1061,17 @@ impl Flowsurface {
                         )
                     };
 
+                    let open_new_window_test = {
+                        let button = button(text("Open new window test")).on_press(Message::OpenNewSettingWindow);
+                        tooltip(
+                            button,
+                            Some("Open a new window for testing"),
+                            TooltipPosition::Top,
+                        )
+                    };
+
                     let column_content = split_column![
+                        column![open_new_window_test,].spacing(8),
                         column![open_data_folder,].spacing(8),
                         column![text("Sidebar position").size(14), sidebar_pos,].spacing(12),
                         column![text("Time zone").size(14), timezone_picklist,].spacing(12),
@@ -911,25 +1162,25 @@ impl Flowsurface {
                             btn
                         }
                     };
-                    let split_pane_button = {
-                        let btn = button(text("Split").align_x(Alignment::Center))
-                            .width(iced::Length::Fill);
-                        if is_main_window {
-                            let dashboard_msg = Message::Dashboard {
-                                layout_id: None,
-                                event: dashboard::Message::Pane(
-                                    main_window,
-                                    dashboard::pane::Message::SplitPane(
-                                        pane_grid::Axis::Horizontal,
-                                        pane_id,
-                                    ),
-                                ),
-                            };
-                            btn.on_press(dashboard_msg)
-                        } else {
-                            btn
-                        }
-                    };
+                    // let split_pane_button = {
+                    //     let btn = button(text("Split").align_x(Alignment::Center))
+                    //         .width(iced::Length::Fill);
+                    //     if is_main_window {
+                    //         let dashboard_msg = Message::Dashboard {
+                    //             layout_id: None,
+                    //             event: dashboard::Message::Pane(
+                    //                 main_window,
+                    //                 dashboard::pane::Message::SplitPane(
+                    //                     pane_grid::Axis::Horizontal,
+                    //                     pane_id,
+                    //                 ),
+                    //             ),
+                    //         };
+                    //         btn.on_press(dashboard_msg)
+                    //     } else {
+                    //         btn
+                    //     }
+                    // };
 
                     column![
                         text(selected_pane_str),
@@ -943,15 +1194,15 @@ impl Flowsurface {
                                 },
                                 TooltipPosition::Top,
                             ),
-                            tooltip(
-                                split_pane_button,
-                                if is_main_window {
-                                    Some("Split selected pane horizontally")
-                                } else {
-                                    None
-                                },
-                                TooltipPosition::Top,
-                            ),
+                            // tooltip(
+                            //     split_pane_button,
+                            //     if is_main_window {
+                            //         Some("Split selected pane horizontally")
+                            //     } else {
+                            //         None
+                            //     },
+                            //     TooltipPosition::Top,
+                            // ),
                         ]
                         .spacing(8)
                     ]

@@ -86,8 +86,8 @@ impl Chart for KlineChart {
                 let interval = timeframe.to_milliseconds();
 
                 let (earliest, latest) = (
-                    chart.x_to_interval(region.x) - (interval / 2),
-                    chart.x_to_interval(region.x + region.width) + (interval / 2),
+                    chart.x_to_interval(region.x).saturating_sub(interval / 2),
+                    chart.x_to_interval(region.x + region.width).saturating_add(interval / 2),
                 );
 
                 Some((earliest, latest))
@@ -1581,6 +1581,15 @@ fn draw_clusters(
                     );
                 }
             }
+            
+            // 计算整个kline的总delta_qty
+            let total_delta: f32 = footprint.trades.values()
+                .map(|group| group.delta_qty())
+                .sum();
+            if total_delta != 0.0 {
+                // 在 k 线顶部绘制总delta_qty
+                draw_delta_qty(frame, &price_to_y, area.candle_center_x, kline, total_delta, palette, text_size);
+            }
 
             draw_footprint_kline(
                 frame,
@@ -1593,6 +1602,39 @@ fn draw_clusters(
         }
     }
 }
+
+fn draw_delta_qty(
+    frame: &mut canvas::Frame,
+    price_to_y: &impl Fn(Price) -> f32,
+    candle_center_x: f32,
+    kline: &Kline,
+    delta_qty: f32,
+    palette: &Extended,
+    text_size: f32,
+) {
+    let text_color = if delta_qty >= 0.0 {
+        palette.success.base.color
+    } else {
+        palette.danger.base.color
+    };
+    
+    // 计算kline顶部的y坐标
+    let y = price_to_y(kline.high);
+    
+    frame.fill_text(
+        canvas::Text {
+            content: format!("{:.2}", delta_qty),
+            position: Point::new(candle_center_x - (text_size / 2.0), y - text_size),
+            size: iced::Pixels(text_size),
+            color: text_color,
+            align_x: Alignment::Start.into(),
+            align_y: Alignment::Center.into(),
+            font: style::AZERET_MONO,
+            ..canvas::Text::default()
+        }
+    );
+}
+
 
 fn draw_imbalance_markers(
     frame: &mut canvas::Frame,

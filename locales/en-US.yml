@@ -1,0 +1,8 @@
+settings:
+  title: "Settings"
+  theme: "Theme"
+  timezone: "Time Zone"
+  language: "Language"
+  interface_scale: "Interface Scale"
+chart:
+  choose_a_view_to_get_started: "Choose a view to get started"
