@@ -889,7 +889,7 @@ impl canvas::Program<Message> for KlineChart {
                         let text_size_from_width =
                             (cell_width_unscaled * 0.1).round().min(16.0) - 3.0;
 
-                        text_size_from_height.min(text_size_from_width)
+                        text_size_from_height.min(text_size_from_width).max(1.0)
                     };
 
                     let candle_width = 0.1 * chart.cell_width;
