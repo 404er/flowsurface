@@ -1,6 +1,6 @@
 use iced::{
     Alignment, Element,
-    widget::{button, column, container, text, text_input, pick_list, scrollable, row},
+    widget::{button, column, container, text, pick_list, scrollable, row},
 };
 use crate::widget::{
     confirm_dialog_container,

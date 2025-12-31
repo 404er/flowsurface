@@ -21,10 +21,6 @@ mod i18n;
 
 rust_i18n::i18n!("locales", fallback = "en-US");
 use rust_i18n::t;
-// ============================================================================
-// 依赖导入：从其他 crate (库) 导入需要的类型和函数
-// use 语句用于将项目引入当前作用域，避免每次都写完整路径
-// ============================================================================
 use data::config::theme::default_theme;
 use data::{layout::WindowSpec, sidebar};
 use layout::{LayoutId, configuration};
@@ -47,12 +43,6 @@ use iced::{
 };
 use std::{collections::HashMap, vec};
 
-/// ============================================================================
-/// 应用程序入口点
-/// 
-/// Rust 程序从 main 函数开始执行
-/// 这里初始化日志系统、启动后台任务，并运行 GUI 主循环
-/// ============================================================================
 fn main() {
     // 初始化日志系统
     logger::setup(cfg!(debug_assertions)).expect("Failed to initialize logger");
@@ -60,12 +50,6 @@ fn main() {
     // 在后台线程中清理旧的市场数据文件
     std::thread::spawn(data::cleanup_old_market_data);
 
-    // iced::daemon() 启动 GUI 应用程序，使用 Elm 架构
-    // 参数说明：
-    //   1. new: 初始化函数，返回 (State, Task)
-    //   2. update: 状态更新函数，处理消息并返回新的 Task
-    //   3. view: 视图渲染函数，根据状态生成 UI
-    // let _ = ... 忽略返回值（应用退出时的结果）
     let _ = iced::daemon(Flowsurface::new, Flowsurface::update, Flowsurface::view)
         .settings(iced::Settings {
             antialiasing: true,  // 开启抗锯齿，使图形更平滑
@@ -472,7 +456,7 @@ impl Flowsurface {
                         }
                         None => Task::none(),
                     };
-
+                      // 处理额外的 dashboard 事件
                     return main_task
                         .map(move |msg| Message::Dashboard {
                             layout_id: Some(layout_id),

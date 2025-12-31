@@ -60,8 +60,8 @@ enum-map.workspace = true
 fern = "0.7.1"
 rodio = { version = "0.20.1", default-features = false, features = [ "wav" ]}
 
-exchange = { version = "0.1.0", path = "exchange", package = "flowsurface-exchange" }
-data = { version = "0.1.0", path = "data", package = "flowsurface-data" }
+exchange = { version = "0.8.6", path = "exchange", package = "flowsurface-exchange" }
+data = { version = "0.8.6", path = "data", package = "flowsurface-data" }
 rust-i18n.workspace = true
 [dev-dependencies]
 cargo-watch = "8.0"

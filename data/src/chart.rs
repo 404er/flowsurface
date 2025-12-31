@@ -54,8 +54,8 @@ pub struct ViewConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq)]
 pub enum Autoscale {
-    #[default]
     CenterLatest,
+    #[default]
     FitToVisible,
 }
 

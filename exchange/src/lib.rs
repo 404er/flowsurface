@@ -1,9 +1,26 @@
-pub mod adapter;
-pub mod connect;
-pub mod depth;
-pub mod fetcher;
-mod limiter;
-pub mod util;
+// ============================================================================
+// 交易所核心模块
+// 
+// 这个模块定义了与交易所交互的所有核心类型和功能
+// 
+// 主要组成部分：
+// - adapter: 交易所适配器（Binance、Bybit、Hyperliquid、OKX）
+// - connect: WebSocket 连接管理
+// - depth: 订单簿（L2 Depth）处理
+// - fetcher: 历史数据获取
+// - util: 工具类型（Price、PriceStep 等）
+// 
+// 设计模式：
+// - 适配器模式：统一不同交易所的 API
+// - 策略模式：不同交易所有不同的解析策略
+// ============================================================================
+
+pub mod adapter;   // 交易所适配器
+pub mod connect;   // WebSocket 连接
+pub mod depth;     // 订单簿数据
+pub mod fetcher;   // 历史数据获取
+mod limiter;       // 速率限制器（私有）
+pub mod util;      // 工具函数和类型
 
 use crate::util::{ContractSize, MinQtySize, MinTicksize, Price};
 pub use adapter::Event;
@@ -15,32 +32,73 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::{fmt, hash::Hash};
 
-/// Unit for displaying volume/quantity size values.
+/// ============================================================================
+/// SizeUnit - 数量显示单位枚举
 ///
-/// - `Base`: Display in base asset units (e.g., BTC for BTCUSDT)
-/// - `Quote`: Display in quote currency value (e.g., USD/USDT equivalent)
+/// 控制交易量和数量的显示方式
+/// 
+/// 变体说明：
+/// - `Base`: 使用基础资产单位显示（例如 BTC）
+/// - `Quote`: 使用报价货币显示（例如 USD/USDT 等值）
 ///
-/// Note: Only applies to linear perpetuals and spot markets.
-/// Inverse perpetuals always display in USD regardless of this setting.
+/// 注意事项：
+/// - 仅适用于线性合约和现货市场
+/// - 反向合约（如 BTCUSD）始终以 USD 显示，不受此设置影响
+/// 
+/// Rust 特性：
+/// - #[repr(u8)] 指定内存布局，用于与原子操作兼容
+/// - #[default] 标记默认变体（Quote）
+/// - 实现了 Copy trait，可以按位复制
+/// - 实现了 Hash trait，可以作为 HashMap 的键
+/// ============================================================================
 #[repr(u8)]
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub enum SizeUnit {
+    /// 基础资产单位（例如：BTC、ETH）
     Base = 0,
+    
+    /// 报价货币单位（例如：USDT、USD）- 默认选项
     #[default]
     Quote = 1,
 }
 
+/// ============================================================================
+/// 全局数量单位设置
+/// 
+/// 使用原子类型实现线程安全的全局配置
+/// 
+/// Rust 特性：
+/// - AtomicU8 提供无锁的原子操作
+/// - static 变量在整个程序生命周期内存在
+/// - Ordering::Relaxed 表示不需要严格的内存顺序保证（性能最优）
+/// ============================================================================
 static SIZE_CALC_UNIT: AtomicU8 = AtomicU8::new(SizeUnit::Base as u8);
 
+/// 设置首选的数量显示单位
+/// 
+/// 这是一个全局设置，影响所有图表和面板
+/// 
+/// # 参数
+/// - v: 新的数量单位
+/// 
+/// # 线程安全
+/// 使用原子操作，可以从任何线程安全调用
 pub fn set_preferred_currency(v: SizeUnit) {
     SIZE_CALC_UNIT.store(v as u8, Ordering::Relaxed);
 }
 
+/// 获取当前的数量显示单位
+/// 
+/// # 返回值
+/// 当前设置的 SizeUnit
+/// 
+/// # 线程安全
+/// 使用原子加载，可以从任何线程安全调用
 pub fn volume_size_unit() -> SizeUnit {
     match SIZE_CALC_UNIT.load(Ordering::Relaxed) {
         0 => SizeUnit::Base,
         1 => SizeUnit::Quote,
-        _ => SizeUnit::Base,
+        _ => SizeUnit::Base,  // 默认值（不应该到达这里）
     }
 }
 
@@ -288,17 +346,67 @@ impl fmt::Display for SerTicker {
     }
 }
 
+/// ============================================================================
+/// Ticker - 交易对标识符
+/// 
+/// 高效的交易对表示，使用固定大小的数组存储
+/// 
+/// 设计目标：
+/// - 内存紧凑：固定大小，可以 Copy
+/// - 性能优化：避免堆分配，适合作为 HashMap 的键
+/// - 类型安全：编译时保证长度限制
+/// 
+/// 内存布局：
+/// ```
+/// ┌─────────────────┬──────────┬─────────────────┬────────────────┐
+/// │ bytes[28]       │ exchange │ display_bytes[28]│ has_display   │
+/// │ (内部符号)      │ (1 byte) │ (显示符号)       │ (1 byte)      │
+/// └─────────────────┴──────────┴─────────────────┴────────────────┘
+///  总大小：28 + 1 + 28 + 1 = 58 字节
+/// ```
+/// 
+/// Rust 特性：
+/// - #[derive(Copy)] 实现按位复制，避免堆分配
+/// - 固定大小数组 [u8; N] 直接存储在栈上
+/// - PartialEq, Eq, Hash 使其可以作为集合的元素
+/// 
+/// 性能优势：
+/// - 无堆分配（相比 String）
+/// - 快速复制（Copy trait）
+/// - 高效哈希（固定大小）
+/// - 缓存友好（连续内存）
+/// ============================================================================
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ticker {
+    /// 内部交易对符号（ASCII 字符串）
+    /// 
+    /// 存储交易所的原始符号（如 "BTCUSDT"、"@107"）
+    /// 未使用的字节填充为 0
     bytes: [u8; Ticker::MAX_LEN as usize],
+    
+    /// 所属交易所
     pub exchange: Exchange,
-    // Optional display symbol for UI, mainly used for Hyperliquid spot markets
-    // to show "HYPEUSDC" instead of "@107"
+    
+    /// 可选的显示符号
+    /// 
+    /// 主要用于 Hyperliquid 现货市场
+    /// 例如：内部符号 "@107" 显示为 "HYPEUSDC"
+    /// 
+    /// 未使用时填充为 0
     display_bytes: [u8; Ticker::MAX_LEN as usize],
+    
+    /// 是否有自定义显示符号
+    /// 
+    /// true: 使用 display_bytes
+    /// false: 使用 bytes
     has_display_symbol: bool,
 }
 
 impl Ticker {
+    /// 交易对符号的最大长度（字节）
+    /// 
+    /// 28 字节足以容纳所有已知交易所的符号
+    /// 例如：最长的符号 "1000PEPEUSDT" 只有 12 字节
     const MAX_LEN: u8 = 28;
 
     pub fn new(ticker: &str, exchange: Exchange) -> Self {

@@ -1,6 +1,7 @@
 use super::ScaleFactor;
 use super::sidebar::Sidebar;
 use super::timezone::UserTimezone;
+use crate::i18n::Language;
 use crate::layout::WindowSpec;
 use crate::{AudioStream, Layout, Theme};
 
@@ -25,6 +26,7 @@ pub struct State {
     pub audio_cfg: AudioStream,
     pub trade_fetch_enabled: bool,
     pub size_in_quote_ccy: exchange::SizeUnit,
+    pub language: Language,
 }
 
 impl State {
@@ -50,6 +52,7 @@ impl State {
             audio_cfg,
             trade_fetch_enabled: exchange::fetcher::is_trade_fetch_enabled(),
             size_in_quote_ccy: volume_size_unit,
+            language: Language::English,
         }
     }
 }

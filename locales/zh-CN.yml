@@ -6,3 +6,6 @@ settings:
   interface_scale: "界面缩放"
 chart:
   choose_a_view_to_get_started: "选择一个视图开始"
+  loading: "加载中..."
+  no_ticker_selected: "未选择交易对"
+  waiting_for_data: "等待数据..."

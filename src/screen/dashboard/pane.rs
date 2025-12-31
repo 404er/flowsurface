@@ -93,7 +93,7 @@ pub enum Event {
     StudyConfigurator(modal::pane::settings::study::StudyMessage),
     StreamModifierChanged(modal::stream::Message),
     ComparisonChartInteraction(super::chart::comparison::Message),
-    MiniTickersListInteraction(modal::pane::mini_tickers_list::Message)
+    MiniTickersListInteraction(modal::pane::mini_tickers_list::Message),
 }
 
 pub struct State {
@@ -510,11 +510,11 @@ impl State {
 
         let uninitialized_base = |kind: ContentKind| -> Element<'a, Message> {
             if self.has_stream() {
-                center(text("Loading…").size(16)).into()
+                center(text(t!("chart.loading")).size(16)).into()
             } else {
                 let content = column![
                     text(kind.to_string()).size(16),
-                    text("No ticker selected").size(14)
+                    text(t!("chart.no_ticker_selected")).size(14)
                 ]
                 .spacing(8)
                 .align_x(Alignment::Center);
@@ -1284,8 +1284,16 @@ impl State {
 
         let tooltip_pos = tooltip::Position::Bottom;
         let mut buttons = row![];
-
+        
         let show_modal = |modal: Modal| Message::PaneEvent(pane, Event::ShowModal(modal));
+
+        buttons = buttons.push(button_with_tooltip(
+            icon_text(Icon::ResizeSmall, 12),
+            show_modal(Modal::Settings),
+            Some("Refresh"),
+            tooltip_pos,
+            control_btn_style(false),
+        ));
 
         if !treat_as_starter {
             buttons = buttons.push(button_with_tooltip(
@@ -1330,7 +1338,7 @@ impl State {
         }
 
         buttons = buttons.push(button_with_tooltip(
-            icon_text(Icon::ChartOutline, 12),
+            icon_text(Icon::DragHandle, 12),
             Message::SplitPane(pane_grid::Axis::Horizontal, pane),
             Some("Split"),
             tooltip_pos,

@@ -4,7 +4,6 @@ use crate::screen::dashboard::panel::timeandsales;
 use crate::split_column;
 use crate::widget::{classic_slider_row, labeled_slider};
 use crate::{style, tooltip, widget::scrollable_content};
-
 use data::chart::heatmap::HeatmapStudy;
 use data::chart::kline::FootprintStudy;
 use data::chart::{
@@ -26,6 +25,7 @@ use iced::{
     },
 };
 use std::time::Duration;
+use crate::screen::ConfirmDialog;
 
 fn cfg_view_container<'a, T>(max_width: u32, content: T) -> Element<'a, Message>
 where

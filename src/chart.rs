@@ -25,7 +25,7 @@ use exchange::fetcher::{FetchRange, FetchRequests, FetchSpec, RequestHandler};
 use exchange::util::{Price, PriceStep};
 use scale::linear::PriceInfoLabel;
 use scale::{AxisLabelsX, AxisLabelsY};
-
+use rust_i18n::t;
 use iced::theme::palette::Extended;
 use iced::widget::canvas::{self, Cache, Canvas, Event, Frame, LineDash, Path, Stroke};
 use iced::{
@@ -482,9 +482,6 @@ pub fn update<T: Chart>(chart: &mut T, message: &Message) {
 
             if let Some(Autoscale::FitToVisible) = state.layout.autoscale {
                 state.translation.x = translation.x;
-                state.translation.y = translation.y;
-                log::info!("Translation: x={}, y={}, autoscale={:?}", 
-                translation.x, translation.y, state.layout.autoscale);
             } else {
                 state.translation = *translation;
                 state.layout.autoscale = None;
@@ -674,7 +671,7 @@ pub fn view<'a, T: Chart>(
     timezone: data::UserTimezone,
 ) -> Element<'a, Message> {
     if chart.is_empty() {
-        return center(text("Waiting for data...").size(16)).into();
+        return center(text(t!("chart.waiting_for_data")).size(16)).into();
     }
 
     let state = chart.state();

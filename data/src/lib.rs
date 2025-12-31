@@ -2,16 +2,18 @@ pub mod aggr;
 pub mod audio;
 pub mod chart;
 pub mod config;
+pub mod i18n;
 pub mod layout;
 pub mod log;
 pub mod panel;
 pub mod tickers_table;
 pub mod util;
 
+rust_i18n::i18n!("../locales", fallback = "en-US");
+
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-
 pub use audio::AudioStream;
 pub use config::ScaleFactor;
 pub use config::sidebar::{self, Sidebar};

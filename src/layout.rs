@@ -8,7 +8,7 @@ use data::{
 use iced::widget::pane_grid::{self, Configuration};
 use std::vec;
 use uuid::Uuid;
-
+use crate::i18n;
 pub struct Layout {
     pub id: LayoutId,
     pub dashboard: Dashboard,
@@ -19,7 +19,7 @@ pub struct LayoutId {
     pub unique: Uuid,
     pub name: String,
 }
-
+#[allow(unused)]
 pub struct SavedState {
     pub layout_manager: LayoutManager,
     pub main_window: Option<WindowSpec>,
@@ -30,6 +30,7 @@ pub struct SavedState {
     pub custom_theme: Option<data::Theme>,
     pub audio_cfg: data::AudioStream,
     pub volume_size_unit: exchange::SizeUnit,
+    pub language: i18n::Language,
 }
 
 impl SavedState {
@@ -58,6 +59,7 @@ impl Default for SavedState {
             custom_theme: None,
             audio_cfg: data::AudioStream::default(),
             volume_size_unit: exchange::SizeUnit::Base,
+            language: i18n::Language::English,
         }
     }
 }
@@ -340,6 +342,7 @@ pub fn load_saved_state() -> SavedState {
                 scale_factor: state.scale_factor,
                 audio_cfg: state.audio_cfg,
                 volume_size_unit: state.size_in_quote_ccy,
+                language: state.language,
             }
         }
         Err(e) => {
